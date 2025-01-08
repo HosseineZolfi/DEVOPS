@@ -1,0 +1,77 @@
+version: '3.8'
+
+services:
+ 
+  mysql:
+    image: mysql:5.7
+    container_name: zabbix-mysql
+    environment:
+      MYSQL_ROOT_PASSWORD: ${MYSQL_ROOT_PASSWORD}
+      MYSQL_USER: ${MYSQL_USER}
+      MYSQL_PASSWORD: ${MYSQL_PASSWORD}
+      MYSQL_DATABASE: ${MYSQL_DATABASE}
+    volumes:
+      - mysql_data:/var/lib/mysql
+    networks:
+      - ${DOCKER_NETWORK}
+    restart: always
+
+  zabbix-server:
+    image: zabbix/zabbix-server-mysql:alpine-6.0-latest
+    container_name: zabbix-server
+    environment:
+      DB_SERVER_HOST: mysql
+      MYSQL_USER: ${MYSQL_USER}
+      MYSQL_PASSWORD: ${MYSQL_PASSWORD}
+      MYSQL_DATABASE: ${MYSQL_DATABASE}
+      ZBX_JAVAGATEWAY: zabbix-java-gateway
+      ZBX_SERVER_NAME: ${ZABBIX_SERVER_NAME}
+    ports:
+      - "${ZABBIX_SERVER_PORT}:10051" 
+    depends_on:
+      - mysql
+    volumes:
+      - zabbix_server_data:/var/lib/zabbix
+    networks:
+      - ${DOCKER_NETWORK}
+    restart: always
+
+  zabbix-web:
+    image: zabbix/zabbix-web-nginx-mysql:alpine-6.0-latest
+    container_name: zabbix-web
+    environment:
+      ZBX_SERVER_HOST: zabbix-server
+      DB_SERVER_HOST: mysql
+      MYSQL_USER: ${MYSQL_USER}
+      MYSQL_PASSWORD: ${MYSQL_PASSWORD}
+      MYSQL_DATABASE: ${MYSQL_DATABASE}
+    ports:
+      - "${ZABBIX_WEB_PORT}:8080"
+    depends_on:
+      - zabbix-server
+      - mysql
+    networks:
+      - ${DOCKER_NETWORK}
+    restart: always
+      
+      # i just put this part here beacuse maybe some day you gatta need this part and its an  optional part  if you like to use it
+      # zabbix-agent:
+      #image: zabbix/zabbix-agent:alpine-6.0-latest
+      #container_name: zabbix-agent
+      #environment:
+      #ZBX_SERVER_HOST: zabbix-server
+      #HOSTNAME: ${ZABBIX_AGENT_HOSTNAME}
+      #networks:
+      #- ${DOCKER_NETWORK}
+      #restart: always
+
+networks:
+  ${DOCKER_NETWORK}:
+    driver: bridge
+
+volumes:
+  mysql_data:
+    driver: local
+  zabbix_server_data:
+    driver: local
+
