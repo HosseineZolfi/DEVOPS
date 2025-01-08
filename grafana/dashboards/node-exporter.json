@@ -1,0 +1,21 @@
+{
+  "dashboard": {
+    "id": null,
+    "title": "Node Exporter Metrics",
+    "tags": ["node", "system"],
+    "timezone": "browser",
+    "panels": [
+      {
+        "type": "graph",
+        "title": "CPU Usage",
+        "targets": [
+          {
+            "expr": "avg(rate(node_cpu_seconds_total{mode='user'}[1m])) by (instance)",
+            "format": "time_series"
+          }
+        ]
+      }
+    ]
+  }
+}
+
