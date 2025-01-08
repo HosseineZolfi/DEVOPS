@@ -1,7 +1,6 @@
 version: '3.7'
 
 services:
-  # Prometheus server to scrape metrics
   prometheus:
     image: prom/prometheus:v2.43.0
     container_name: prometheus
@@ -10,14 +9,13 @@ services:
       - ./prometheus/prometheus.yml:/etc/prometheus/prometheus.yml
       - prometheus_data:/prometheus
     ports:
-      - "9090:9090"  # Expose Prometheus on port 9090
+      - "9090:9090"  
     networks:
       - monitoring
     command:
       - '--config.file=/etc/prometheus/prometheus.yml'
       - '--storage.tsdb.path=/prometheus'
 
-  # Node Exporter to collect system-level metrics
   node-exporter:
     image: prom/node-exporter:v1.6.1
     container_name: node-exporter
@@ -25,22 +23,21 @@ services:
     networks:
       - monitoring
     expose:
-      - "9100"  # Node exporter metric endpoint
+      - "9100"  
     ports:
       - "9100:9100"
 
-  # Grafana for visualization
   grafana:
     image: grafana/grafana:9.5.1
     container_name: grafana
     restart: unless-stopped
     environment:
-      - GF_SECURITY_ADMIN_PASSWORD=admin  # Set default Grafana admin password
+      - GF_SECURITY_ADMIN_PASSWORD=admin  
     volumes:
       - ./grafana/provisioning:/etc/grafana/provisioning
       - ./grafana/dashboards:/var/lib/grafana/dashboards
     ports:
-      - "3000:3000"  # Expose Grafana on port 3000
+      - "3000:3000"  
     networks:
       - monitoring
     depends_on:
