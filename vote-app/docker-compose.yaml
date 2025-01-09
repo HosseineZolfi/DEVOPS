@@ -1,0 +1,59 @@
+services:
+  db:
+    image: amirhosseinzolfi/devops:postgres15-alpine
+    container_name: db
+    environment:
+      POSTGRES_USER: postgres
+      POSTGRES_PASSWORD: postgres
+    volumes:
+      - db:/var/lib/postgresql/data
+    networks:
+      - network2
+      - network3
+    restart: always
+
+  redis:
+    image: amirhosseinzolfi/devops:redis-alpine
+    container_name: redis
+    networks:
+      - network2
+      - network1
+    restart: always
+
+  worker:
+    image: amirhosseinzolfi/devops:workerv1.0.0
+    container_name: worker
+    networks:
+      - network2
+    restart: always
+
+  vote:
+    image: amirhosseinzolfi/devops:votev1.0.0
+    container_name: vote
+    networks:
+      - network1
+    ports:
+      - "3000:80"
+    restart: always
+
+  result:
+    image: amirhosseinzolfi/devops:resultv1.0.0
+    container_name: result
+    networks:
+      - network3
+    ports:
+      - "3001:80"
+    restart: always
+
+networks:
+  network1:
+    driver: bridge
+  network2:
+    driver: bridge
+  network3:
+    driver: bridge
+
+volumes:
+  db:
+    driver: local
+
