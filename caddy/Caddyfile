@@ -1,0 +1,9 @@
+http://caddy.hzol.ir {
+    root * /srv
+    file_server browse
+
+    basicauth * {
+        zolfi $2a$14$rcZGUFWybIz5nKLXWRkmTua7/jtvkTrz5IZn6rk7nufRhKzFG2tEy #xaas@321 
+    }
+}
+
