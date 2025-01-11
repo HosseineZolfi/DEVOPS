@@ -1,4 +1,4 @@
-http://caddy.hzol.ir {
+http://caddy.hzol.ir #put you domain or server ip here! {
     root * /srv
     file_server browse
 
