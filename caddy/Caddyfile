@@ -1,9 +1,9 @@
-http://caddy.hzol.ir #put you domain or server ip here! {
-    root * /srv
+http://YOURIP:YOURPORT #put you domain or server ip here! {
+    root * /srv #DIRECTORY_THAT_YOU_WANT_TO_SHOW_INSIDE_CADDYSERVER_WEBSITE
     file_server browse
 
     basicauth * {
-        zolfi $2a$14$rcZGUFWybIz5nKLXWRkmTua7/jtvkTrz5IZn6rk7nufRhKzFG2tEy #xaas@321 
+        zolfi $2a$14$rcZGUFWybIz5nKLXWRkmTua7/jtvkTrz5IZn6rk7nufRhKzFG2tEy #xaas@321_IS_NORMAL_FORM_OF_THIS_PASSWORD_AND_zolfi_IS_USERNAME
     }
 }
 
