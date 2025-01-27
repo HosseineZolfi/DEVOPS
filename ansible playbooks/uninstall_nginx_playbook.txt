@@ -1,0 +1,75 @@
+- name: Fully Purge Nginx and Let's Encrypt Configuration on Ubuntu
+  hosts: all
+  become: yes
+  vars:
+    domain_name: "YOURDOMAIN"
+
+  tasks:
+
+    - name: stop and disable nginx service
+      ansible.builtin.systemd:
+        name: nginx
+        state: stopped
+        enabled: no
+      ignore_errors: yes
+
+    - name: purge nginx and related packages
+      ansible.builtin.apt:
+        name:
+          - nginx
+          - nginx-common
+          - nginx-full
+          - nginx-core
+        state: absent
+        purge: yes
+        autoremove: yes
+      register: nginx_purge
+
+    - name: remove certbot and its nginx plugin
+      ansible.builtin.apt:
+        name:
+          - certbot
+          - python3-certbot-nginx
+        state: absent
+        purge: yes
+        autoremove: yes
+
+    - name: delete SSL certificates for the domain
+      ansible.builtin.file:
+        path: "/etc/letsencrypt/live/{{ domain_name }}"
+        state: absent
+
+    - name: remove let's encrypt configuration files
+      ansible.builtin.file:
+        path: "/etc/letsencrypt/"
+        state: absent
+
+    - name: remove nginx configuration directories and files
+      ansible.builtin.file:
+        path: "{{ item }}"
+        state: absent
+      loop:
+        - /etc/nginx
+        - /var/www/html
+        - /var/log/nginx
+        - /var/lib/nginx
+
+    - name: clean up package dependencies
+      ansible.builtin.apt:
+        autoremove: yes
+        purge: yes
+
+    - name: verify nginx is completely removed
+      ansible.builtin.shell: dpkg -l | grep -q nginx
+      register: nginx_check
+      ignore_errors: yes
+      changed_when: false
+
+    - name: Display verification result
+      ansible.builtin.debug:
+        msg: >-
+          Nginx is {{ 'still installed' if nginx_check.rc == 0 else 'successfully removed' }}.
+
+    - name: display final cleanup success message
+      ansible.builtin.debug:
+        msg: "Nginx and SSL configurations have been completely purged."
