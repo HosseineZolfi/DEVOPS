@@ -1,6 +1,6 @@
 playbook:
 
-before it you should add shecan or some other sni on your targets
+before play it you should add shecan or some other sni on your targets
 
 
 ---
