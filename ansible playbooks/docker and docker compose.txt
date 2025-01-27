@@ -1,0 +1,39 @@
+playbook:
+
+before it you should add shecan or some other sni on your targets
+
+
+---
+- name: install docker & compose
+  hosts: all
+  become: yes
+  tasks:
+    - name: download installation script
+      get_url:
+        url: https://get.docker.com
+        dest: /tmp/get-docker.sh
+        mode: '0755'
+
+    - name: run script
+      command: sh /tmp/get-docker.sh
+
+    - name: download compose
+      vars:
+        docker_compose_version: "VERSION_OF_COMPOSE"
+      get_url:
+        url: "https://github.com/docker/compose/releases/download/{{ docker_compose_version }}/docker-compose-{{ ansible_system | lower }}-{{ ansible_architecture }}"
+        dest: /usr/local/bin/docker-compose
+        mode: '0755'
+
+    - name: checking installation
+      command: docker-compose --version
+      register: docker_compose_version_output
+
+    - name: display version
+      debug:
+        msg: "{{ docker_compose_version_output.stdout }}"
+
+    - name: clean up script
+      file:
+        path: /tmp/get-docker.sh
+        state: absent
