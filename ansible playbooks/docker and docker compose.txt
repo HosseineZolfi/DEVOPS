@@ -3,7 +3,7 @@ playbook:
 before play it you should add shecan or some other sni on your targets
 
 
----
+
 - name: install docker & compose
   hosts: all
   become: yes
