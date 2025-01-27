@@ -1,0 +1,51 @@
+- name: install nginx and configure Lets encrypt SSL
+  hosts: all
+  become: yes
+  vars:
+    domain_name: "YOURDOMAINNAME" 
+    email: "YOUREMAIL" 
+  tasks:
+
+    - name: Update apt cache
+      apt:
+        update_cache: yes
+
+    - name: Install Nginx
+      apt:
+        name: nginx
+        state: present
+
+    - name: Start and enable Nginx service
+      systemd:
+        name: nginx
+        state: started
+        enabled: yes
+
+    - name: Install Certbot and its Nginx plugin
+      apt:
+        name:
+          - certbot
+          - python3-certbot-nginx
+        state: present
+
+    - name: get SSL certificate for Nginx
+      command: >
+        certbot --nginx -d {{ domain_name }} --non-interactive --agree-tos --email {{ email }}
+      register: certbot_output
+
+    - name: Display Certbot output
+      debug:
+        var: certbot_output.stdout
+
+    - name: Verify Nginx is running with SSL
+      command: nginx -t
+      register: nginx_test_output
+
+    - name: Display Nginx test result
+      debug:
+        var: nginx_test_output.stdout
+
+    - name: Reload Nginx to apply changes
+      systemd:
+        name: nginx
+        state: reloaded
