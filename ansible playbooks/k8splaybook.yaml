@@ -1,0 +1,209 @@
+- name: Install Kubernetes on Ubuntu
+  hosts: all
+  become: yes
+  tasks:
+
+  
+    - name: Configure /etc/hosts file
+      blockinfile:
+        path: /etc/hosts
+        block: |
+          192.168.1.111 master1
+          192.168.1.227 master2
+          192.168.1.180 master3
+          192.168.1.112 vipmaster
+          192.168.1.91 worker1
+          192.168.1.204 worker2
+
+    - name: Configure DNS settings
+      copy:
+        dest: /etc/resolv.conf
+        content: |
+          nameserver 172.30.200.20
+          nameserver 172.30.200.30
+
+    - name: Download Docker GPG key manually
+      shell: curl -fsSL https://download.docker.com/linux/ubuntu/gpg -o /etc/apt/trusted.gpg.d/docker.gpg
+
+    - name: Remove old Docker GPG key
+      file:
+        path: /etc/apt/trusted.gpg.d/docker.gpg
+        state: absent
+   
+    - name: Add Docker repository
+      copy:
+        dest: /etc/apt/sources.list.d/docker.list
+        content: |
+          deb [signed-by=/etc/apt/keyrings/docker.gpg] https://download.docker.com/linux/ubuntu {{ ansible_distribution_release }} stable
+
+
+    - name: Update apt package index again
+      apt:
+        update_cache: yes
+
+    - name: Install required packages
+      apt:
+        name:
+          - containerd.io
+          - keepalived
+          - apt-transport-https
+          - ca-certificates
+          - curl
+          - gpg
+        state: present
+
+    - name: Configure containerd modules
+      copy:
+        dest: /etc/modules-load.d/containerd.conf
+        content: |
+          overlay
+          br_netfilter
+
+    - name: Load kernel modules
+      modprobe:
+        name: "{{ item }}"
+        state: present
+      loop:
+        - overlay
+        - br_netfilter
+
+    - name: Configure sysctl for Kubernetes
+      copy:
+        dest: /etc/sysctl.d/kubernetes.conf
+        content: |
+          net.bridge-nf-call-ip6tables = 1
+          net.bridge-nf-call-iptables = 1
+          net.ipv4.ip_forward = 1
+
+    - name: Apply sysctl changes
+      command: sysctl --system
+
+    - name: Generate default containerd config
+      shell: containerd config default | tee /etc/containerd/config.toml >/dev/null 2>&1
+      args:
+        creates: /etc/containerd/config.toml
+
+    - name: Modify containerd config for SystemdCgroup
+      replace:
+        path: /etc/containerd/config.toml
+        regexp: 'SystemdCgroup = false'
+        replace: 'SystemdCgroup = true'
+
+    - name: Modify containerd config for "registry.k8s.io/pause"
+      replace:
+        path: /etc/containerd/config.toml
+        regexp: '"registry.k8s.io/pause:3.8"'
+        replace: '"registry.k8s.io/pause:3.9"'
+
+    - name: Enable and start containerd
+      systemd:
+        name: containerd
+        enabled: yes
+        state: started
+
+    - name: Disable swap in fstab
+      lineinfile:
+        path: /etc/fstab
+        regexp: '^/swapfile'
+        state: absent
+
+    - name: Disable swap
+      command: swapoff -a
+
+    - name: Add Kubernetes GPG key
+      get_url:
+        url: https://pkgs.k8s.io/core:/stable:/v1.28/deb/Release.key
+        dest: /etc/apt/keyrings/kubernetes-apt-keyring.gpg
+        mode: '0644'
+
+    - name: Remove old Kubernetes GPG key
+      file:
+         path: /etc/apt/keyrings/kubernetes-apt-keyring.gpg
+         state: absent
+      
+    - name: Download Kubernetes GPG key
+      shell: curl -fsSL https://pkgs.k8s.io/core:/stable:/v1.28/deb/Release.key | gpg --dearmor -o /etc/apt/keyrings/kubernetes-apt-keyring.gpg
+
+    - name: Add Kubernetes repository
+      copy:
+        dest: /etc/apt/sources.list.d/kubernetes.list
+        content: |
+          deb [signed-by=/etc/apt/keyrings/kubernetes-apt-keyring.gpg] https://pkgs.k8s.io/core:/stable:/v1.28/deb/ /
+
+
+    - name: Update package index for Kubernetes
+      apt:
+        update_cache: yes
+
+    - name: Install Kubernetes packages
+      apt:
+        name:
+          - kubelet=1.28.0-1.1
+          - kubeadm=1.28.0-1.1
+          - kubectl=1.28.0-1.1
+        state: present
+
+    - name: Hold Kubernetes packages
+      dpkg_selections:
+        name: "{{ item }}"
+        selection: hold
+      loop:
+        - kubelet
+        - kubeadm
+        - kubectl
+
+    - name: Create check_k8s.sh script
+      copy:
+        dest: /usr/local/bin/check_k8s.sh
+        content: |
+          #!/bin/bash
+          if [ -z "`pidof containerd`" ]
+          then
+            exit 1
+          fi
+        mode: '0755'
+        owner: root
+        group: root
+
+    - name: Configure keepalived for master nodes
+      copy:
+        dest: /etc/keepalived/keepalived.conf
+        content: |
+          global_defs {
+            router_id keepalived_{{ inventory_hostname }}
+          }
+
+          vrrp_script check_k8s {
+            script "/usr/local/bin/check_k8s.sh"
+            interval 2
+            weight 50
+            timeout 5
+          }
+
+          vrrp_instance VI_01 {
+            state {{ 'MASTER' if inventory_hostname == 'master1' else 'BACKUP' }}
+            interface ens3
+            virtual_router_id 100
+            priority {{ '100' if inventory_hostname == 'master1' else '90' if inventory_hostname == 'master2' else '80' }}
+            virtual_ipaddress {
+              192.168.1.112
+            }
+            track_script {
+              check_k8s
+            }
+            authentication {
+              auth_type PASS
+              auth_pass 09026663504
+            }
+          }
+        mode: '0644'
+        owner: root
+        group: root
+      when: "'masters' in group_names"
+
+    - name: Enable and start Keepalived
+      systemd:
+        name: keepalived
+        enabled: yes
+        state: started
+      when: "'masters' in group_names"
