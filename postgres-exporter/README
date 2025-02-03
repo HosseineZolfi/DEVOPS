@@ -1,3 +1,7 @@
+first of all install postgres sql database in your vm:
+
+apt-get install postgressql -y
+
 before running this docker compose make sure that postgres sql database is installed in your system and then move and change this  options from this files:
 -----------
 1-vim /etc/postgresql/14/main/postgresql.conf:
