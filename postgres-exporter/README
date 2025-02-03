@@ -28,3 +28,12 @@ scrape_configs:
     static_configs:
       - targets: ['185.79.97.94:9187']
 
+after your postgres exporter started you can test your connection with this command:
+curl http://localhost:9187/metrics
+note:
+if your exporter didnt fetch data correctly from promethues check your user and password inside the docker compose file
+you can connect your database using this command:
+1-su postgres
+2-psql -U postgres -h YOURIP -p 5432
+inside the postgres sql:
+3-ALTER USER yourusername WITH PASSWORD 'yourpassword';
