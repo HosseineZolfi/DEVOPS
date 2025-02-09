@@ -1,0 +1,9 @@
+.env file:
+MYSQL_ROOT_PASSWORD: yourpassword
+MYSQL_DATABASE: wordpress
+MYSQL_USER: youruser
+MYSQL_PASSWORD: yourpassword
+WORDPRESS_DB_HOST: db:3306
+WORDPRESS_DB_USER: youruser
+WORDPRESS_DB_PASSWORD: yourpassword
+WORDPRESS_DB_NAME: wordpress
