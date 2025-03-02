@@ -22,7 +22,7 @@ Before starting, ensure that you have the following installed on your server:
 
 ###  Clone the Repository
 ```sh
- git clone https://github.com/your-username/rocketchat-nginx.git](https://github.com/HosseineZolfi/DEVOPS.git
+ git clone https://github.com/HosseineZolfi/DEVOPS.git
  cd rocketchat
 ```
 
