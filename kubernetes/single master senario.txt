@@ -1,0 +1,117 @@
+1-apt update && sudo apt upgrade -y
+
+2-add IP master to /etc/hosts and add shecan or other SNI to /etc/resolv.conf
+      IP worker
+
+3-swapoff -a
+
+4-sed -i '/swap/d' /etc/fstab
+
+5-modprobe overlay
+
+6-modprobe br_netfilter
+
+7-tee /etc/modules-load.d/k8s.conf <<EOF
+overlay
+br_netfilter
+EOF
+
+8-tee /etc/sysctl.d/k8s.conf <<EOF
+net.bridge.bridge-nf-call-iptables = 1
+net.bridge.bridge-nf-call-ip6tables = 1
+net.ipv4.ip_forward = 1
+EOF
+
+9-sysctl --system
+
+10-apt install -y containerd
+
+11-mkdir -p /etc/containerd
+
+12-containerd config default | tee /etc/containerd/config.toml
+
+13-sed -i 's|sandbox_image = "registry.k8s.io/pause:3.8"|sandbox_image = "registry.k8s.io/pause:3.9"|' /etc/containerd/config.toml
+
+ also: sed -i 's/SystemdCgroup \= false/SystemdCgroup \= true/g' /etc/containerd/config.toml
+
+14-systemctl restart containerd
+
+15-systemctl enable containerd
+
+16-apt-get install -y apt-transport-https ca-certificates curl
+
+17-echo "deb [signed-by=/etc/apt/keyrings/kubernetes-apt-keyring.gpg] https://pkgs.k8s.io/core:/stable:/v1.30/deb/ /" | tee /etc/apt/sources.list.d/kubernetes.list
+
+18-curl -fsSL https://pkgs.k8s.io/core:/stable:/v1.30/deb/Release.key | gpg --dearmor -o /etc/apt/keyrings/kubernetes-apt-keyring.gpg
+
+19-apt update
+
+20-apt list -a kubeadm
+
+21-apt-get install -y kubeadm=1.30.0-1.1 kubelet=1.30.0-1.1 kubectl=1.30.0-1.1
+
+22-systemctl enable kubelet.service
+
+23-apt-mark hold kubelet kubeadm kubectl
+==================================from this step it refers to master node:
+
+24---------kubeadm-config.yaml 
+
+apiVersion: kubeadm.k8s.io/v1beta3
+kind: InitConfiguration
+nodeRegistration:
+  criSocket: "/run/containerd/containerd.sock"
+
+---
+apiVersion: kubeadm.k8s.io/v1beta3
+kind: ClusterConfiguration
+kubernetesVersion: "v1.30.0"
+controlPlaneEndpoint: "master:6443"
+imageRepository: "registry.k8s.io"
+networking:
+  podSubnet: "10.0.0.0/16"
+  serviceSubnet: "10.96.0.0/12"
+  dnsDomain: "cluster.local"
+dns:
+  imageTag: "v1.10.1"
+
+----------
+
+25-kubeadm init --config=kubeadm-config.yaml --upload-certs --ignore-preflight-errors=... | tee kubeadm-init.out
+
+26-mkdir -p $HOME/.kube
+
+27-cp -i /etc/kubernetes/admin.conf $HOME/.kube/config
+
+28-chown $(id -u):$(id -g) $HOME/.kube/config
+
+29-wget https://raw.githubusercontent.com/projectcalico/calico/v3.28.2/manifests/calico.yaml
+
+30-vim calico.yaml then find this line(CALICO_IPV4POOL_CIDR) and uncomment it then replace with these content:
+	- name: CALICO_IPV4POOL_CIDR
+          value: "10.0.0.0/16"
+
+31-kubectl apply -f calico.yaml
+
+32- bash script for installing command auto complete in kubernetes:
+---------------
+#!/bin/bash
+
+# Install bash-completion
+echo "Installing bash-completion..."
+sudo apt install bash-completion -y
+
+# Enable kubectl auto-completion
+echo "Enabling kubectl auto-completion..."
+echo 'source <(kubectl completion bash)' >> ~/.bashrc
+
+# Enable alias auto-completion (Optional)
+echo "Setting up alias auto-completion..."
+echo 'alias k=kubectl' >> ~/.bashrc
+echo 'complete -o default -F __start_kubectl k' >> ~/.bashrc
+# Reload bash configuration
+echo "Reloading bash configuration..."
+source ~/.bashrc
+
+echo "✅ Bash completion for kubectl is now enabled! Try using 'kubectl get' and press [TAB] to autocomplete."
+---------------
