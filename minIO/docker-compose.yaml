@@ -1,0 +1,39 @@
+services:
+  minio:
+    image: minio/minio:latest
+    container_name: minio
+    environment:
+      MINIO_ACCESS_KEY: ${MINIO_ACCESS_KEY}
+      MINIO_SECRET_KEY: ${MINIO_SECRET_KEY}
+    ports:
+      - "${MINIO_EXTERNAL_IP}:9000:9000"
+      - "${MINIO_EXTERNAL_IP}:9001:9001"
+    volumes:
+      - minio_data:/data
+      - ./minio-secrets:/etc/secrets
+    networks:
+      - minio_network
+    command: server /data --console-address ":9001"
+    restart: always
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:9000/minio/health/live"]
+      interval: 30s
+      retries: 3
+      timeout: 10s
+    logging:
+      driver: "json-file"
+      options:
+        max-size: "10m"
+        max-file: "3"
+
+volumes:
+  minio_data:
+    driver: local
+    driver_opts:
+      type: 'none'
+      device: '/mnt/data/minio'
+      o: 'bind'
+
+networks:
+  minio_network:
+    driver: bridge
