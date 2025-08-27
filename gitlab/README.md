@@ -1,3 +1,3 @@
 ```
-sudo docker compsoe up -d
+sudo docker compose up -d
 ```
