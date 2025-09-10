@@ -5,7 +5,7 @@
 # Now with: live per-stage progress bars (auto-updating), optional undo, and no per-stage pre-confirmation
 #
 # - INSTALL: LAMP + WordPress (subdir /var/www/html/wordpress) with port checks & prompts
-# - HARDEN : Built-in hardening (no external modules; no Let’s Encrypt)
+# - HARDEN : Built-in hardening (no external modules; no Let's Encrypt)
 # - UNINSTALL (PURGE): content-only | complete | apps-only — staged with best-effort undo
 #
 # DISCLAIMER: "Undo" is best-effort. Package operations and firewall rules can be hard to
@@ -229,7 +229,7 @@ class StageRunner:
             if step.note:
                 print_yellow(f"  {step.note}")
 
-            # (CHANGED) No “Proceed with this stage?” prompt — run immediately
+            # (CHANGED) No "Proceed with this stage?" prompt — run immediately
             start = time.time()
             _progress_start(step.name, step.expected_ops)
             try:
@@ -280,24 +280,48 @@ class StageRunner:
 # Port check helpers
 # ================================
 
-def check_port_status(port: int) -> bool:
-    if command_exists("ss"):
-        r = subprocess.run(f"ss -tpln | grep -q ':{port}\\b'", shell=True)
-        return r.returncode == 0
-    elif command_exists("netstat"):
-        r = subprocess.run(f"netstat -tpln | grep -q ':{port}\\b'", shell=True)
-        return r.returncode == 0
-    else:
-        print_red("Neither ss nor netstat is installed. Cannot check port status.")
-        sys.exit(1)
+def check_port_status(port):
+    try:
+        # Try using ss first
+        result = subprocess.run(['ss', '-tpln'], capture_output=True, text=True, check=True)
+        if f":{port}" in result.stdout:
+            return True
+    except (subprocess.CalledProcessError, FileNotFoundError):
+        try:
+            # Fall back to netstat if ss fails
+            result = subprocess.run(['netstat', '-tpln'], capture_output=True, text=True, check=True)
+            if f":{port}" in result.stdout:
+                return True
+        except (subprocess.CalledProcessError, FileNotFoundError):
+            print_red("Neither ss nor netstat is installed. Cannot check port status.")
+            sys.exit(1)
+    return False
 
+def run_command(command, description, progress_callback=None):
+    """Run a command and optionally update progress"""
+    if progress_callback:
+        progress_callback()
+    
+    try:
+        result = subprocess.run(command, shell=True, check=True, 
+                              stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+        return True
+    except subprocess.CalledProcessError:
+        return False
 
 def check_ports_80_443():
-    print_green("🔍 Checking port 80 (HTTP)…")
-    print_green("✅ Port 80 is OPEN.") if check_port_status(80) else print_red("❌ Port 80 is CLOSED.")
-    print_green("🔍 Checking port 443 (HTTPS)…")
-    print_green("✅ Port 443 is OPEN.") if check_port_status(443) else print_red("❌ Port 443 is CLOSED.")
+    # Check ports first
+    print_green("🔍 Checking port 80 (HTTP)...")
+    if check_port_status(80):
+        print_green("✅ Port 80 is OPEN.")
+    else:
+        print_red("❌ Port 80 is CLOSED.")
 
+    print_green("🔍 Checking port 443 (HTTPS)...")
+    if check_port_status(443):
+        print_green("✅ Port 443 is OPEN.")
+    else:
+        print_red("❌ Port 443 is CLOSED.")
 
 # ================================
 # Paths / config
@@ -311,165 +335,16 @@ TRASH_ROOT = Path("/var/tmp/wp-manager-trash")
 TRASH_ROOT.mkdir(parents=True, exist_ok=True)
 
 # In-memory session state for this run
-RUN_STATE = {
-    "downloaded_wp_dir": False,
-    "backups": [],  # list of tuples (src, backup_path)
-}
+RUN_STATE = {"backups": []}
 
-
-# ================================
-# LAMP + WordPress install functions
-# ================================
-
-def install_prereqs():
-    print_green("🔄 Updating package index and installing prerequisites…")
-    # (CHANGED) Removed apt-get upgrade -y per request
-    run("apt-get update -y")
-    run("apt-get install -y software-properties-common curl ca-certificates lsb-release apt-transport-https")
-
-def undo_install_prereqs():
-    print_yellow("Best-effort: running autoremove/autoclean…")
-    run("apt-get -y autoremove || true")
-    run("apt-get -y autoclean || true")
-
-def install_php():
-    print_green("➕ Adding PHP repository (Ondřej PPA)…")
-    run("add-apt-repository -y ppa:ondrej/php")
-    run("apt-get update -y")
-    print_green("🐘 Installing PHP 7.4 and extensions…")
-    run("apt-get install -y php7.4 php7.4-mysql php7.4-curl php7.4-gd php7.4-mbstring php7.4-xml php7.4-zip php7.4-xmlrpc libapache2-mod-php7.4")
-
-def undo_install_php():
-    print_yellow("Removing PHP packages (best-effort)…")
-    run("apt-get remove --purge -y 'php7.4*' 'libapache2-mod-php7.4' || true")
-    run("apt-get -y autoremove || true")
-
-def install_mysql():
-    print_green("🛢️ Installing MySQL server…")
-    env = os.environ.copy()
-    env["DEBIAN_FRONTEND"] = "noninteractive"
-    run("apt-get install -y mysql-server", env=env)
-    print_yellow("⚠️ Running mysql_secure_installation interactively. Follow prompts.")
-    run("mysql_secure_installation || true")
-
-def undo_install_mysql():
-    print_yellow("Removing MySQL server (best-effort)…")
-    run("systemctl stop mysql || true")
-    run("apt-get remove --purge -y mysql-server mysql-client mariadb-server mariadb-client || true")
-    run("apt-get -y autoremove || true")
-
-def configure_mysql_wp(name: str, user: str, pw: str):
-    print_green("🛠️ Configuring MySQL for WordPress…")
-    sql = f"""
-    CREATE DATABASE IF NOT EXISTS {name};
-    CREATE USER IF NOT EXISTS '{user}'@'localhost' IDENTIFIED BY '{pw}';
-    GRANT ALL PRIVILEGES ON {name}.* TO '{user}'@'localhost';
-    FLUSH PRIVILEGES;
-    """
-    run(f"mysql -u root <<'EOF'\n{sql}\nEOF")
-
-def undo_configure_mysql_wp(name: str, user: str):
-    print_yellow("Dropping created DB/user (best-effort)…")
-    run(
-        f"mysql -u root <<'EOF'\nSET sql_notes=0; DROP DATABASE IF EXISTS {name}; DROP USER IF EXISTS '{user}'@'localhost'; FLUSH PRIVILEGES;\nEOF || true"
-    )
-
-def install_apache():
-    print_green("🌐 Installing Apache web server…")
-    run("apt-get install -y apache2")
-    run("a2enmod rewrite")
-    run("systemctl enable apache2")
-    run("systemctl restart apache2")
-
-def undo_install_apache():
-    print_yellow("Removing Apache (best-effort)…")
-    run("systemctl stop apache2 || true")
-    run("apt-get remove -y apache2 apache2-utils apache2-bin || true")
-    run("apt-get -y autoremove || true")
-
-def download_wordpress(apache_root: Path, wp_dir: Path):
-    print_green("⬇️ Downloading WordPress…")
-    if not wp_dir.exists():
-        with tempfile.TemporaryDirectory() as td:
-            td_path = Path(td)
-            run(f"curl -fSLo {td_path/'latest.tar.gz'} https://wordpress.org/latest.tar.gz")
-            run(f"tar xzvf {td_path/'latest.tar.gz'} -C {td_path}")
-            run(f"mv {td_path/'wordpress'} {apache_root}/")
-        RUN_STATE["downloaded_wp_dir"] = True
-        (wp_dir/".wp_manager_created").write_text("created\n", encoding="utf-8")
-    else:
-        print_yellow(f"WordPress directory already exists at {wp_dir} — skipping download.")
-    print_green("🔒 Setting permissions…")
-    run(f"chown -R www-data:www-data {wp_dir}")
-    run(f"find {wp_dir} -type d -exec chmod 755 {{}} \\;")
-    run(f"find {wp_dir} -type f -exec chmod 644 {{}} \\;")
-
-def undo_download_wordpress(wp_dir: Path):
-    if (wp_dir/".wp_manager_created").exists():
-        print_yellow("Removing freshly created WordPress directory…")
-        run(f"rm -rf --one-file-system -- '{wp_dir}' || true")
-    else:
-        warn("WordPress dir pre-existed; not removing.")
-
-def _fetch_salts() -> str:
-    try:
-        with urllib.request.urlopen("https://api.wordpress.org/secret-key/1.1/salt/", timeout=10) as r:
-            return r.read().decode("utf-8")
-    except Exception:
-        return ""
-
-def _backup(path: Path) -> Optional[Path]:
+def _backup(path: Path):
+    """Backup a file and record it for potential undo"""
     if not path.exists():
-        return None
-    ts = int(time.time())
-    b = path.with_suffix(path.suffix + f".bak.{ts}")
-    shutil.copy2(path, b)
-    RUN_STATE["backups"].append((str(path), str(b)))
-    return b
-
-def configure_wp_config(wp_dir: Path, db_name: str, db_user: str, db_pass: str):
-    print_green("⚙️ Configuring wp-config.php…")
-    wp_cfg = wp_dir / "wp-config.php"
-    wp_sample = wp_dir / "wp-config-sample.php"
-    if not wp_cfg.exists() and wp_sample.exists():
-        shutil.copyfile(wp_sample, wp_cfg)
-    progress_tick()
-    _backup(wp_cfg)
-    text = wp_cfg.read_text(encoding="utf-8")
-    progress_tick()
-    text = text.replace("'DB_NAME', 'database_name_here'", f"'DB_NAME', '{db_name}'")
-    text = text.replace("'DB_USER', 'username_here'", f"'DB_USER', '{db_user}'")
-    text = text.replace("'DB_PASSWORD', 'password_here'", f"'DB_PASSWORD', '{db_pass}'")
-    text = text.replace("'DB_HOST', 'localhost'", "'DB_HOST', 'localhost'")
-    lines = []
-    for line in text.splitlines():
-        if any(k in line for k in [
-            "AUTH_KEY","SECURE_AUTH_KEY","LOGGED_IN_KEY","NONCE_KEY",
-            "AUTH_SALT","SECURE_AUTH_SALT","LOGGED_IN_SALT","NONCE_SALT"
-        ]):
-            continue
-        lines.append(line)
-    text = "\n".join(lines)
-    salts = _fetch_salts()
-    if salts:
-        text += "\n" + salts + "\n"
-    wp_cfg.write_text(text, encoding="utf-8")
-    progress_tick()
-
-def undo_configure_wp_config(wp_dir: Path):
-    wp_cfg = wp_dir / "wp-config.php"
-    backups = [Path(b) for (src, b) in RUN_STATE["backups"] if src == str(wp_cfg)]
-    if backups:
-        latest = sorted(backups)[-1]
-        print_yellow(f"Restoring {wp_cfg} from {latest}…")
-        shutil.copy2(latest, wp_cfg)
-    else:
-        warn("No backup tracked; leaving current wp-config.php as is.")
-
-def restart_apache():
-    print_green("🔁 Restarting Apache…")
-    run("systemctl restart apache2 || systemctl restart httpd || true")
-
+        return
+    bak = path.with_suffix(path.suffix + f".bak.{int(time.time())}")
+    shutil.copy2(path, bak)
+    RUN_STATE["backups"].append((str(path), str(bak)))
+    return bak
 
 # ================================
 # HARDEN — Embedded functions
@@ -853,6 +728,8 @@ def undo_generate_log_report():
     if out.exists():
         out.unlink()
 
+def restart_apache():
+    run("systemctl restart apache2 || true")
 
 # ================================
 # HARDEN workflow
@@ -1136,6 +1013,83 @@ def uninstall_menu():
 # ================================
 # INSTALL workflow (staged)
 # ================================
+
+def install_prereqs():
+    run("apt-get update -y")
+    run("apt-get install -y software-properties-common curl")
+
+def undo_install_prereqs():
+    run("apt-get remove -y software-properties-common curl")
+
+def install_php():
+    run("add-apt-repository -y ppa:ondrej/php")
+    run("apt-get update -y")
+    run("apt-get install -y php7.4 php7.4-mysql php7.4-curl php7.4-gd php7.4-mbstring php7.4-xml php7.4-zip php7.4-xmlrpc")
+
+def undo_install_php():
+    run("apt-get remove -y 'php7.4*'")
+    run("add-apt-repository --remove -y ppa:ondrej/php")
+
+def install_mysql():
+    run("apt-get install -y mysql-server")
+    # Secure MySQL installation
+    mysql_secure_cmd = [
+        "mysql",
+        "-e",
+        "ALTER USER 'root'@'localhost' IDENTIFIED WITH mysql_native_password BY '';"
+        "DELETE FROM mysql.user WHERE User='';"
+        "DELETE FROM mysql.user WHERE User='root' AND Host NOT IN ('localhost', '127.0.0.1', '::1');"
+        "DROP DATABASE IF EXISTS test;"
+        "DELETE FROM mysql.db WHERE Db='test' OR Db='test\\_%';"
+        "FLUSH PRIVILEGES;"
+    ]
+    subprocess.run(mysql_secure_cmd, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+
+def undo_install_mysql():
+    run("apt-get remove -y mysql-server mysql-client")
+
+def configure_mysql_wp(db_name, db_user, db_password):
+    mysql_cmd = f"mysql -u root -e \"CREATE DATABASE IF NOT EXISTS {db_name}; CREATE USER IF NOT EXISTS '{db_user}'@'localhost' IDENTIFIED BY '{db_password}'; GRANT ALL PRIVILEGES ON {db_name}.* TO '{db_user}'@'localhost'; FLUSH PRIVILEGES;\""
+    run(mysql_cmd)
+
+def undo_configure_mysql_wp(db_name, db_user):
+    mysql_cmd = f"mysql -u root -e \"DROP DATABASE IF EXISTS {db_name}; DROP USER IF EXISTS '{db_user}'@'localhost'; FLUSH PRIVILEGES;\""
+    run(mysql_cmd)
+
+def install_apache():
+    run("apt-get install -y apache2")
+    run("a2enmod rewrite")
+    run("systemctl restart apache2")
+
+def undo_install_apache():
+    run("apt-get remove -y apache2 apache2-utils apache2-bin")
+
+def download_wordpress(apache_root, wp_dir):
+    if not wp_dir.exists():
+        run("cd /tmp && curl -LO https://wordpress.org/latest.tar.gz")
+        run("tar xzvf /tmp/latest.tar.gz -C /tmp")
+        run(f"mv /tmp/wordpress {apache_root}/")
+        run(f"chown -R www-data:www-data {wp_dir}")
+        run(f"chmod -R 755 {wp_dir}")
+        run("rm /tmp/latest.tar.gz")
+
+def undo_download_wordpress(wp_dir):
+    if wp_dir.exists():
+        run(f"rm -rf {wp_dir}")
+
+def configure_wp_config(wp_dir, db_name, db_user, db_password):
+    wp_config = wp_dir / "wp-config.php"
+    if not wp_config.exists():
+        run(f"cp {wp_dir}/wp-config-sample.php {wp_config}")
+    
+    run(f"sed -i \"s/'DB_NAME', 'database_name_here'/'DB_NAME', '{db_name}'/g\" {wp_config}")
+    run(f"sed -i \"s/'DB_USER', 'username_here'/'DB_USER', '{db_user}'/g\" {wp_config}")
+    run(f"sed -i \"s/'DB_PASSWORD', 'password_here'/'DB_PASSWORD', '{db_password}'/g\" {wp_config}")
+
+def undo_configure_wp_config(wp_dir):
+    wp_config = wp_dir / "wp-config.php"
+    if wp_config.exists():
+        run(f"rm {wp_config}")
 
 def install_menu():
     check_ports_80_443()
