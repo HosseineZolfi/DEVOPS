@@ -1,40 +1,52 @@
-# BigBlueButton Deployment
+# Bacula Deployment with Docker
 
-This repository provides a comprehensive setup for deploying BigBlueButton (BBB), an open-source web conferencing system tailored for online learning. It includes configurations and scripts to facilitate the installation and management of BBB on a dedicated server.
+This repository provides a setup for deploying **Bacula** — an open-source backup solution — using Docker. The configuration files in this repository define the setup for the Bacula Director (bacula-dir), Bacula File Daemon (bacula-fd), and Bacula Storage Daemon (bacula-sd), as well as the orchestration of the entire environment using Docker Compose.
 
 ## Overview
 
-BigBlueButton is designed to support real-time sharing of audio, video, slides (with whiteboard annotations), chat, and screen. It offers features such as:
+Bacula is a set of programs to manage backup, recovery, and verification of data across a network of computers. It offers enterprise-level backup features and supports a variety of storage devices.
 
-- **Multi-user whiteboard**: Collaborate in real-time on a shared whiteboard.
-- **Breakout rooms**: Divide participants into smaller groups for focused discussions.
-- **Polling**: Engage participants with real-time polls.
-- **Chat**: Communicate via public and private chat.
-- **Document upload**: Share presentations and documents.
-- **Shared notes**: Collaborate on shared notes during sessions.
-- **Screen sharing**: Present your screen to participants.
-- **Webcam video**: Share live video feeds.
-- **Learning Analytics Dashboard**: Monitor participant engagement and learning metrics.
+This setup includes the following components:
 
-For a detailed list of features, refer to the official BigBlueButton features page ([bigbluebutton.org](https://bigbluebutton.org/features/?utm_source=chatgpt.com)).
+- **Bacula Director (bacula-dir)**: The central component of Bacula that manages backup jobs, schedules, and configurations.
+- **Bacula File Daemon (bacula-fd)**: A component that runs on the client machine and facilitates communication with the Director to back up and restore data.
+- **Bacula Storage Daemon (bacula-sd)**: Manages backup storage devices (like tapes or disk storage).
+- **Docker Compose**: Used to define and run multi-container Docker applications for Bacula services.
 
-## Prerequisites
+## Project Structure
 
-Before deploying BigBlueButton, ensure your server meets the following requirements:
+The repository consists of the following files:
 
-- **Operating System**: Ubuntu 20.04 64-bit
-- **CPU**: Minimum 4 cores
-- **RAM**: Minimum 8 GB
-- **Storage**: At least 50 GB of free space
-- **Bandwidth**: 1 Gbps recommended
+### 1. **bacula-dir.conf**
+   - **Description**: Configuration file for the Bacula Director. It defines the Director’s settings, including job definitions, storage configuration, client configuration, and scheduling.
+   - **Usage**: Configure this file to manage the backup processes, schedule jobs, and specify the network settings for Bacula.
 
-For detailed installation instructions, refer to the official BigBlueButton installation guide ([bigbluebutton.github.io](https://bigbluebutton.github.io/2.5/install.html?utm_source=chatgpt.com)).
+### 2. **bacula-fd.conf**
+   - **Description**: Configuration file for the Bacula File Daemon. It specifies the settings for the client machine, including the Director's address, storage daemon, and the files to be backed up.
+   - **Usage**: Customize this file to match the client environment where backups need to be executed.
 
-## Deployment
+### 3. **bacula-sd.conf**
+   - **Description**: Configuration file for the Bacula Storage Daemon. It contains information about backup storage devices and pool management.
+   - **Usage**: Set up storage locations, backup media pools, and define device configurations here.
 
-This repository includes scripts and configurations to automate the deployment of BigBlueButton. To get started:
+### 4. **docker-compose.yaml**
+   - **Description**: Docker Compose configuration file that orchestrates the Bacula Director, File Daemon, and Storage Daemon containers. It simplifies the deployment of Bacula services in a Docker environment.
+   - **Usage**: Use this file to deploy and manage the Bacula services within Docker containers.
 
-1. Clone this repository to your server:
+## Getting Started
+
+To get started with Bacula deployment, follow these steps:
+
+### Prerequisites
+
+- Docker and Docker Compose installed on your server.
+- A machine (client) with the Bacula File Daemon installed for backup.
+
+### Steps to Deploy
+
+1. **Clone the repository:**
+
+   Clone this repository to your local machine or server:
 
    ```bash
    git clone https://github.com/HosseineZolfi/DEVOPS.git
