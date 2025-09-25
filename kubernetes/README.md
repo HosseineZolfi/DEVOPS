@@ -192,31 +192,30 @@ This guide walks you through the installation and setup process for Kubernetes o
 
 ## 5. Auto-Completion for kubectl
 
-1. Install bash-completion:
-    ```bash
-    sudo apt install bash-completion -y
-    ```
+Here is the bash script to enable auto-completion for kubectl:
 
-2. Enable kubectl auto-completion:
-    ```bash
-    echo 'source <(kubectl completion bash)' >> ~/.bashrc
-    ```
+```bash
+#!/bin/bash
 
-3. Set up alias and enable alias auto-completion (optional):
-    ```bash
-    echo 'alias k=kubectl' >> ~/.bashrc
-    echo 'complete -o default -F __start_kubectl k' >> ~/.bashrc
-    ```
+# Install bash-completion
+echo "Installing bash-completion..."
+sudo apt install bash-completion -y
 
-4. Reload the bash configuration:
-    ```bash
-    source ~/.bashrc
-    ```
+# Enable kubectl auto-completion
+echo "Enabling kubectl auto-completion..."
+echo 'source <(kubectl completion bash)' >> ~/.bashrc
 
-5. Verify auto-completion:
-    ```bash
-    echo "✅ Bash completion for kubectl is now enabled! Try using 'kubectl get' and press [TAB] to autocomplete."
-    ```
+# Enable alias auto-completion (Optional)
+echo "Setting up alias auto-completion..."
+echo 'alias k=kubectl' >> ~/.bashrc
+echo 'complete -o default -F __start_kubectl k' >> ~/.bashrc
+
+# Reload bash configuration
+echo "Reloading bash configuration..."
+source ~/.bashrc
+
+echo "✅ Bash completion for kubectl is now enabled! Try using 'kubectl get' and press [TAB] to autocomplete."
+```
 
 ---
 
