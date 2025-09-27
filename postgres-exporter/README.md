@@ -1,33 +1,30 @@
-# PostgreSQL + Postgres Exporter — Setup Guide
+# PostgreSQL Exporter (Prometheus) — Setup Guide
 
-This guide walks you through preparing a host-installed **PostgreSQL** instance and exposing its metrics via **postgres_exporter**, then scraping those metrics with **Prometheus**.
+This README explains how to expose metrics from a **host-installed PostgreSQL** instance using **postgres_exporter** and scrape them with **Prometheus**, based on the provided Docker Compose service.
 
-> **Scope:** PostgreSQL is installed **on the VM**, not in Docker. The exporter runs (e.g., via Docker Compose), and Prometheus scrapes it.
+> **Context**: PostgreSQL runs **on the VM**. The exporter runs in Docker with **host networking**, so it listens on the host at port **9187** by default.
 
 ---
 
 ## Prerequisites
 
-- Ubuntu/Debian VM with sudo access  
-- Docker Compose stack that includes **postgres_exporter** (or plan to run it)  
-- The VM’s public/private IP (referenced below as `YOUR_IP`)
+- Ubuntu/Debian VM with sudo access
+- **PostgreSQL** already installed and running on the VM
+- Docker Engine + Docker Compose
+- A PostgreSQL role (user) and password that the exporter will use
 
 ---
 
-## 1) Install PostgreSQL on the VM
+## 1) Install & prepare PostgreSQL on the host
+
+Install (if you haven't already):
 
 ```bash
 sudo apt-get update && sudo apt-get upgrade -y
 sudo apt-get install postgresql -y
 ```
 
-> Package name is **postgresql** (not “postgressql”).
-
----
-
-## 2) Allow PostgreSQL to listen for remote connections
-
-Edit `postgresql.conf` (adjust versioned path if needed):
+Allow PostgreSQL to listen for remote/TCP connections (adjust versioned path as needed):
 
 ```bash
 sudo vim /etc/postgresql/14/main/postgresql.conf
@@ -39,78 +36,95 @@ Uncomment and set:
 listen_addresses = '*'
 ```
 
----
-
-## 3) Permit your client/exporter IP in `pg_hba.conf`
-
-Edit `pg_hba.conf`:
+Authorize the exporter/Prometheus host in **pg_hba.conf**:
 
 ```bash
 sudo vim /etc/postgresql/14/main/pg_hba.conf
 ```
 
-Find the block:
+Add **below** the existing IPv4 local connection line and replace `YOUR_IP` with the machine that will connect (the exporter container shares the host network, so you can also allow `127.0.0.1/32` if the exporter runs on the same VM):
 
-```text
-# IPv4 local connections:
-host    all             all             127.0.0.1/32            scram-sha-256
-```
-
-Add a line **below it** that allows your Prometheus/exporter host to connect (replace `YOUR_IP`):
-
-```text
-host    all             all             YOUR_IP/32               scram-sha-256
-```
-
-**Example final block:**
 ```text
 # IPv4 local connections:
 host    all             all             127.0.0.1/32             scram-sha-256
 host    all             all             YOUR_IP/32               scram-sha-256
 ```
 
-> Use `scram-sha-256` unless you have a specific reason to use another method.
-
----
-
-## 4) Restart (or reload) PostgreSQL
+Restart PostgreSQL:
 
 ```bash
 sudo systemctl restart postgresql
-# or, if only config changed and you want fewer interruptions:
-# sudo systemctl reload postgresql
-```
-
-Optional quick check:
-
-```bash
-ss -ltnp | grep 5432
 ```
 
 ---
 
-## 5) Configure **postgres_exporter** credentials
+## 2) Create a minimally‑privileged user for the exporter (recommended)
 
-Your exporter needs valid DB credentials (user & password) with permission to read metrics.  
-If you use Docker Compose for the exporter, ensure its env vars (e.g., `DATA_SOURCE_NAME` or user/password vars) match a valid PostgreSQL role.
-
-**Create/adjust a passworded role (example):**
 ```bash
-# become postgres user
+# become postgres and open psql
 sudo -u postgres psql
 
 -- inside psql:
-ALTER USER yourusername WITH PASSWORD 'yourpassword';
+CREATE USER metrics WITH PASSWORD 'strong_password';
+GRANT pg_monitor TO metrics;   -- requires Postgres 10+
+-- (optional) if pg_monitor is not available, grant SELECT on pg_catalog or required views
 \q
 ```
 
-> If your exporter isn’t returning data, double-check these credentials in your docker-compose file.
+> Using a dedicated user with `pg_monitor` is preferred over `postgres` superuser.
 
 ---
 
-## 6) Add the exporter target to Prometheus
+## 3) Docker Compose service (provided)
 
-Update your `prometheus.yml` (indentation matters):
+Create or update `docker-compose.yml` with the following service (kept exactly as requested):
+
+```yaml
+services:
+  postgres-exporter:
+    image: quay.io/prometheuscommunity/postgres-exporter
+    environment:
+      DATA_SOURCE_NAME: "postgresql://username:password@hostip:port/postgres?sslmode=disable"
+    network_mode: host
+    restart: always
+```
+
+### Configure `DATA_SOURCE_NAME`
+
+Replace the placeholders:
+
+- `username`: the PostgreSQL role (e.g., `metrics`)
+- `password`: the role’s password
+- `hostip`: use `127.0.0.1` if the exporter runs on the same VM as PostgreSQL (recommended with `network_mode: host`)
+- `port`: PostgreSQL port (default `5432`)
+- `postgres`: database name (you can keep `postgres` or specify another DB)
+
+**Examples**
+
+Same VM (common case):
+```
+DATA_SOURCE_NAME=postgresql://metrics:STRONG_PASS@127.0.0.1:5432/postgres?sslmode=disable
+```
+
+Remote DB:
+```
+DATA_SOURCE_NAME=postgresql://metrics:STRONG_PASS@YOUR_DB_IP:5432/postgres?sslmode=disable
+```
+
+> `network_mode: host` binds exporter port **9187** on the host. Make sure nothing else is using `9187`.
+
+Start the service:
+
+```bash
+docker compose up -d
+docker compose logs -f postgres-exporter
+```
+
+---
+
+## 4) Add the exporter to Prometheus
+
+Edit your `prometheus.yml` and add the job (note indentation):
 
 ```yaml
 global:
@@ -118,71 +132,63 @@ global:
   evaluation_interval: 15s
 
 scrape_configs:
-  - job_name: 'postgres-exporter'
+  - job_name: "postgres-exporter"
     static_configs:
-      - targets: ['YOUR_IP:9187']   # replace with the exporter host:port
+      - targets: ["YOUR_EXPORTER_HOST:9187"]
 ```
 
-Reload Prometheus or restart your stack so it picks up the new config.
+- If Prometheus runs on the **same VM**, you can use `localhost:9187`.
+- Otherwise, use the VM IP where the exporter is running.
+
+Reload Prometheus or restart your stack to apply changes.
 
 ---
 
-## 7) Verify metrics
+## 5) Verify metrics
 
-From the host that can reach the exporter:
+From the VM (or any host that can reach the exporter):
 
 ```bash
-curl http://localhost:9187/metrics      # if you’re on the same host
+curl http://localhost:9187/metrics      # if on the same VM
 # or
-curl http://YOUR_IP:9187/metrics        # from another machine
+curl http://YOUR_EXPORTER_HOST:9187/metrics
 ```
 
-You should see Prometheus-formatted metrics output.
-
----
-
-## 8) Connect to PostgreSQL (manual checks)
-
-```bash
-# option A: via local system postgres account
-sudo -u postgres psql
-
-# option B: remote/local TCP connection
-psql -U postgres -h YOUR_IP -p 5432
-```
-
-If needed, change a user’s password (inside `psql`):
-
-```sql
-ALTER USER yourusername WITH PASSWORD 'yourpassword';
-```
+You should see Prometheus‑formatted metrics like `pg_up`, `pg_stat_*`, etc.
 
 ---
 
 ## Troubleshooting
 
-- **Exporter up, but no metrics in Prometheus:**  
-  Confirm the `prometheus.yml` target IP/port and that the job name is correct.
-- **Exporter returns auth errors:**  
-  Role/password mismatch. Re-check the exporter env vars and `pg_hba.conf` entry (CIDR and auth method).
-- **Cannot connect remotely:**  
-  Verify `listen_addresses='*'`, `pg_hba.conf` includes `YOUR_IP/32`, and any firewalls (ufw/security groups) allow `5432` and exporter port `9187`.
-- **YAML issues:**  
-  Ensure proper indentation under `scrape_configs` (list items start with `-`).
+- **Exporter starts but Prometheus shows target DOWN**  
+  Check firewall/security groups for port `9187`. Validate the `targets` entry in `prometheus.yml`.
+
+- **Exporter logs show authentication or permission errors**  
+  Re‑check the `DATA_SOURCE_NAME` credentials and that the user exists. If using the `metrics` role, ensure it has `pg_monitor` (or the necessary SELECT privileges).
+
+- **Cannot connect from exporter to DB**  
+  Ensure `listen_addresses='*'` in `postgresql.conf`, and `pg_hba.conf` includes either `127.0.0.1/32` (same VM) or `YOUR_IP/32` as appropriate. Confirm PostgreSQL is listening on port `5432` (`ss -ltnp | grep 5432`).
+
+- **Port conflict on 9187**  
+  Because of `network_mode: host`, the exporter binds the host port directly. Free the port or run without host networking and map a port explicitly.
 
 ---
 
 ## Security Notes
 
-- Limit access strictly: use a specific `YOUR_IP/32` or your Prometheus node’s IP rather than `0.0.0.0/0`.  
-- Use strong passwords and consider TLS if traversing untrusted networks.  
-- Prefer a minimally-privileged role for the exporter.
+- Prefer `127.0.0.1` in `DATA_SOURCE_NAME` when exporter and DB run on the same VM.  
+- Use a strong password and a dedicated role (e.g., `metrics`) with **least privilege**.  
+- Restrict network access to port `9187` if Prometheus is the only consumer.  
+- Consider using TLS and/or placing Prometheus and the exporter on a private network.
 
 ---
 
 ## Summary
 
-1) Install PostgreSQL → 2) enable remote listen → 3) grant IP in `pg_hba.conf` → 4) restart PostgreSQL →  
-5) ensure exporter credentials → 6) add Prometheus job → 7) `curl` metrics → 8) adjust users as needed.
+1) Prepare PostgreSQL to listen and allow connections (edit `postgresql.conf`, `pg_hba.conf`) →  
+2) Create a minimally‑privileged user for metrics →  
+3) Run the exporter with the exact Compose service above and set `DATA_SOURCE_NAME` →  
+4) Add a Prometheus scrape job →  
+5) Verify at `http://<host>:9187/metrics`.
 
-You’re set to monitor PostgreSQL with Prometheus!
+All set! Your PostgreSQL metrics should now be visible in Prometheus.
